@@ -95,7 +95,7 @@ def scrape_dice_jobs(query, limit=20, easy_apply_filter=True, max_workers=10):
     page = 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         while len(job_details_to_fetch) < limit:
-            base_url = f"https://www.dice.com/jobs?q={query}&radius=30&radiusUnit=mi&page={page}"
+            base_url = f"https://www.dice.com/jobs?filters.postedDate=ONE&filters.employmentType=CONTRACTS&q={query}&page={page}"
             if easy_apply_filter:
                 base_url += "&filters.easyApply=true"
             soup = get_soup(base_url)
