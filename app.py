@@ -1,15 +1,16 @@
-import streamlit as st
-import requests
-import pandas as pd
-import time
-import random
 import concurrent.futures
-import logging
-from bs4 import BeautifulSoup
-from datetime import datetime
-from dateutil import parser
-from functools import lru_cache
 import io
+import logging
+import random
+import time
+from datetime import datetime
+from functools import lru_cache
+
+import pandas as pd
+import requests
+import streamlit as st
+from bs4 import BeautifulSoup
+from dateutil import parser
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def extract_date_posted(desc_soup):
     """Extract the date a job was posted"""
     if not desc_soup:
         return 'Posted date not found'
-        
+
     posted_tag = desc_soup.find('dhi-time-ago')
     if posted_tag and posted_tag.has_attr('posted-date'):
         date_str = posted_tag['posted-date']
@@ -61,12 +62,12 @@ def extract_description(desc_soup):
     """Extract job description"""
     if not desc_soup:
         return 'Description not available'
-        
+
     desc_tag = desc_soup.find('div', class_='description')
     if not desc_tag:
         desc_tag = desc_soup.find('div', class_='job-description') or \
                   desc_soup.find('p', class_='text-sm font-normal text-zinc-900')
-    
+
     return desc_tag.get_text(strip=True) if desc_tag else 'Description not available'
 
 def parse_job_card(card, job_index, easy_apply_filter=True):
@@ -75,25 +76,25 @@ def parse_job_card(card, job_index, easy_apply_filter=True):
         job_link = card.find('a', {'data-testid': 'job-search-job-card-link'})
         if not job_link or not job_link.has_attr('href'):
             return None
-            
+
         job_link = job_link['href']
-        
+
         # Check for Easy Apply if filter is enabled
         easy_apply = card.find('div', {'aria-labelledby': 'easyApply-label'})
         application_type = 'Easy Apply' if easy_apply else 'External Apply'
-        
+
         # Skip if Easy Apply filter is on and this job is not Easy Apply
         if easy_apply_filter and not easy_apply:
             return None
-            
+
         title_tag = card.find('a', {'data-testid': 'job-search-job-detail-link'})
         company_tag = card.find('p', class_='mb-0')
         location_tag = card.find('p', string=lambda t: t and ('Remote' in t or ',' in t))
         employment_type = card.find('div', {'aria-labelledby': 'employmentType-label'})
         salary = card.find('div', {'aria-labelledby': 'salary-label'})
-        
+
         full_job_url = job_link if job_link.startswith('http') else f'https://www.dice.com{job_link}'
-        
+
         # Basic job data that doesn't require visiting the job page
         job_data = {
             'Job Title': title_tag.get_text(strip=True) if title_tag else 'N/A',
@@ -106,9 +107,9 @@ def parse_job_card(card, job_index, easy_apply_filter=True):
             'full_job_url': full_job_url,  # Temporary field for the executor
             'job_index': job_index  # Keep track of original order for sorting later
         }
-        
+
         return job_data
-        
+
     except Exception as e:
         logger.warning(f"Failed to parse job card: {e}")
         st.error(f"Could not parse job card: {e}")
@@ -119,18 +120,18 @@ def fetch_job_details(job_data):
     try:
         if not job_data:
             return None
-            
+
         full_job_url = job_data.pop('full_job_url')  # Remove temporary field
-        
+
         # Get the job description page
         desc_soup = get_soup(full_job_url)
-        
+
         # Add additional details
         job_data['Date Posted'] = extract_date_posted(desc_soup)
         job_data['Job Description'] = extract_description(desc_soup)
-        
+
         return job_data
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch job details: {e}")
         st.error(f"Failed to fetch job details: {e}")
@@ -141,7 +142,7 @@ def scrape_dice_jobs(query, limit, easy_apply_filter=True, max_workers=10, progr
     jobs = []
     job_details_to_fetch = []
     page = 1
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         while len(job_details_to_fetch) < limit:
             # Build URL based on Easy Apply filter
@@ -149,56 +150,56 @@ def scrape_dice_jobs(query, limit, easy_apply_filter=True, max_workers=10, progr
                 base_url = f"https://www.dice.com/jobs?filters.easyApply=true&q={query}&radius=30&radiusUnit=mi&page={page}"
             else:
                 base_url = f"https://www.dice.com/jobs?q={query}&radius=30&radiusUnit=mi&page={page}"
-            
+
             if status_text:
                 status_text.text(f"Fetching page {page}...")
-            
+
             soup = get_soup(base_url)
-            
+
             if not soup:
                 st.error(f"Failed to fetch page {page}")
                 break
-                
+
             job_cards = soup.find_all(
                 'div',
                 class_='flex flex-col gap-6 overflow-hidden rounded-lg border bg-surface-primary p-6 relative mx-auto h-full w-full border-transparent shadow-none transition duration-300 ease-in-out sm:border-zinc-100 sm:shadow'
             )
-            
+
             if not job_cards:
                 if status_text:
                     status_text.text(f"No more job cards found on page {page}.")
                 break
-            
+
             if status_text:
                 status_text.text(f"Page {page}: Found {len(job_cards)} jobs. Processing...")
-            
+
             # First pass: extract basic job data from the search results page
             job_index = 0
             for card in job_cards:
                 if len(job_details_to_fetch) >= limit:
                     break
-                    
+
                 job_data = parse_job_card(card, job_index, easy_apply_filter)
                 job_index += 1
-                
+
                 if job_data:
                     job_details_to_fetch.append(job_data)
-            
+
             if len(job_details_to_fetch) >= limit or len(job_details_to_fetch) == 0:
                 break
-                
+
             page += 1
             time.sleep(random.uniform(0.5, 1.5))  # Respect the site with a small delay between pages
-        
+
         # Second pass: fetch job details in parallel
         job_details_to_fetch = job_details_to_fetch[:limit]  # Ensure we don't exceed the limit
-        
+
         if status_text:
             status_text.text(f"Fetching detailed information for {len(job_details_to_fetch)} jobs...")
-        
+
         # Submit all jobs to the executor
         future_to_job = {executor.submit(fetch_job_details, job_data): job_data for job_data in job_details_to_fetch}
-        
+
         # Collect results as they complete
         completed_jobs = 0
         for future in concurrent.futures.as_completed(future_to_job):
@@ -206,10 +207,10 @@ def scrape_dice_jobs(query, limit, easy_apply_filter=True, max_workers=10, progr
             if job_data:
                 jobs.append(job_data)
             completed_jobs += 1
-            
+
             if progress_bar:
                 progress_bar.progress(completed_jobs / len(job_details_to_fetch))
-    
+
     # Sort jobs by original index to maintain order
     jobs.sort(key=lambda x: x.pop('job_index') if 'job_index' in x else 999999)
     return jobs
@@ -226,53 +227,53 @@ def create_excel_download(df, query):
 def main():
     st.title("💼 Dice.com Job Scraper")
     st.markdown("Search and scrape Easy Apply jobs from Dice.com")
-    
+
     # Sidebar for inputs
     with st.sidebar:
         st.header("Search Parameters")
         query = st.text_input("Job Title", placeholder="e.g., Python Developer")
         limit = st.number_input("Number of Jobs", min_value=1, max_value=100, value=10)
         easy_apply_only = st.toggle("Easy Apply Only", value=True, help="Filter jobs to only show Easy Apply positions")
-        
+
         search_button = st.button("🔍 Search Jobs", type="primary")
-    
+
     # Main content area
     if search_button:
         if not query:
             st.error("Please enter a job title to search.")
             return
-        
+
         # Convert query to the format expected by the scraper
         formatted_query = query.strip().lower().replace(' ', '+')
-        
+
         # Progress indicators
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
+
         # Start scraping
         start_time = time.time()
-        
+
         try:
             jobs = scrape_dice_jobs(formatted_query, limit, easy_apply_only, progress_bar=progress_bar, status_text=status_text)
-            
+
             if jobs:
                 # Clear progress indicators
                 progress_bar.empty()
                 status_text.empty()
-                
+
                 # Success message
                 st.success(f"Successfully scraped {len(jobs)} jobs in {time.time() - start_time:.2f} seconds!")
-                
+
                 # Create DataFrame
                 df = pd.DataFrame(jobs)
-                
+
                 # Reorder columns for better display
                 column_order = ['Job Title', 'Company', 'Location', 'Position Type', 'Compensation', 'Date Posted', 'Application', 'Job Link', 'Job Description']
                 df = df.reindex(columns=[col for col in column_order if col in df.columns])
-                
+
                 # Display results in a table
                 st.header("📋 Job Results")
-                
+
                 # Make the table interactive with better formatting
                 st.dataframe(
                     df,
@@ -287,14 +288,14 @@ def main():
                         )
                     }
                 )
-                
+
                 # Download button
                 st.header("📥 Download Results")
-                
+
                 # Create Excel file
                 excel_data = create_excel_download(df, formatted_query)
                 filename = f"dice_jobs_{formatted_query.replace('+', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                
+
                 st.download_button(
                     label="📊 Download Excel File",
                     data=excel_data,
@@ -302,37 +303,37 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary"
                 )
-                
+
                 # Display summary statistics
                 with st.expander("📊 Summary Statistics"):
                     col1, col2, col3, col4 = st.columns(4)
-                    
+
                     with col1:
                         st.metric("Total Jobs Found", len(jobs))
-                    
+
                     with col2:
                         companies = df['Company'].nunique()
                         st.metric("Unique Companies", companies)
-                    
+
                     with col3:
                         remote_jobs = len(df[df['Location'].str.contains('Remote', case=False, na=False)])
                         st.metric("Remote Jobs", remote_jobs)
-                    
+
                     with col4:
                         easy_apply_jobs = len(df[df['Application'] == 'Easy Apply'])
                         st.metric("Easy Apply Jobs", easy_apply_jobs)
-                
+
             else:
                 progress_bar.empty()
                 status_text.empty()
                 st.warning("No Easy Apply jobs found for your search criteria. Try a different job title.")
-                
+
         except Exception as e:
             logger.exception("Scraping failed")
             progress_bar.empty()
             status_text.empty()
             st.error(f"An error occurred during scraping: {str(e)}")
-    
+
     # Instructions
     with st.expander("ℹ️ How to Use"):
         st.markdown("""
@@ -341,7 +342,7 @@ def main():
         3. **Click Search**: The app will scrape Easy Apply jobs from Dice.com
         4. **View Results**: Jobs will be displayed in a table format
         5. **Download**: Click the download button to get an Excel file with all the results
-        
+
         **Note**: Toggle "Easy Apply Only" to filter jobs that can be applied to directly through Dice.com, or turn it off to see all available positions.
         """)
 
