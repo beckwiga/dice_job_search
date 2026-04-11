@@ -4,11 +4,14 @@ import pandas as pd
 import time
 import random
 import concurrent.futures
+import logging
 from bs4 import BeautifulSoup
 from datetime import datetime
 from dateutil import parser
 from functools import lru_cache
 import io
+
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -35,6 +38,7 @@ def get_soup(url):
         response.raise_for_status()
         return BeautifulSoup(response.text, 'html.parser')
     except Exception as e:
+        logger.error(f"Failed to fetch {url}: {e}")
         st.error(f"Failed to fetch {url}: {e}")
         return None
 
@@ -48,7 +52,8 @@ def extract_date_posted(desc_soup):
         date_str = posted_tag['posted-date']
         try:
             return parser.isoparse(date_str).strftime('%b %d, %Y')
-        except:
+        except (ValueError, OverflowError):
+            logger.warning(f"Failed to parse date: {date_str}")
             return date_str
     return 'Posted date not found'
 
@@ -105,6 +110,7 @@ def parse_job_card(card, job_index, easy_apply_filter=True):
         return job_data
         
     except Exception as e:
+        logger.warning(f"Failed to parse job card: {e}")
         st.error(f"Could not parse job card: {e}")
         return None
 
@@ -126,6 +132,7 @@ def fetch_job_details(job_data):
         return job_data
         
     except Exception as e:
+        logger.error(f"Failed to fetch job details: {e}")
         st.error(f"Failed to fetch job details: {e}")
         return job_data if 'job_index' in job_data else None
 
@@ -321,6 +328,7 @@ def main():
                 st.warning("No Easy Apply jobs found for your search criteria. Try a different job title.")
                 
         except Exception as e:
+            logger.exception("Scraping failed")
             progress_bar.empty()
             status_text.empty()
             st.error(f"An error occurred during scraping: {str(e)}")
